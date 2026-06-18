@@ -40,16 +40,20 @@ class _MemberDashboardState extends State<MemberDashboard> {
             .select('*, membership_plans(nama)')
             .eq('user_id', userId)
             .eq('status', 'aktif')
-            .maybeSingle(),
+            .order('tanggal_berakhir', ascending: false)
+            .limit(1),
         Supabase.instance.client
             .from('membership_plans')
-            .select('nama, durasi_hari, harga')
+            .select('id, nama, durasi_hari, harga')
             .order('harga'),
       ]);
 
       if (mounted) {
+        final membershipList = results[0] as List;
         setState(() {
-          _activeMembership = results[0] as Map<String, dynamic>?;
+          _activeMembership = membershipList.isNotEmpty
+              ? membershipList.first as Map<String, dynamic>
+              : null;
           _plans = List<Map<String, dynamic>>.from(results[1] as List);
         });
       }
@@ -180,6 +184,103 @@ class _MemberDashboardState extends State<MemberDashboard> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Gagal check-in: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _buyPlan(Map<String, dynamic> plan) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Konfirmasi Pembelian'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Paket: ${plan['nama'] ?? '-'}'),
+            const SizedBox(height: 4),
+            Text('Harga: ${_formatRupiah(plan['harga'] ?? 0)}'),
+            const SizedBox(height: 12),
+            const Text(
+              'Ini adalah pembayaran simulasi demo.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepPurple,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ya, Beli'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      final planId = plan['id']?.toString();
+      final harga = (plan['harga'] as num?)?.toInt() ?? 0;
+      final durasi = (plan['durasi_hari'] as num?)?.toInt() ?? 0;
+      final now = DateTime.now();
+
+      String _fmt(DateTime d) =>
+          '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+      final tanggalMulai = _fmt(now);
+      final tanggalBerakhir = _fmt(now.add(Duration(days: durasi)));
+
+      await Supabase.instance.client
+          .from('memberships')
+          .update({'status': 'nonaktif'})
+          .eq('user_id', userId)
+          .eq('status', 'aktif');
+
+      await Supabase.instance.client.from('memberships').insert({
+        'user_id': userId,
+        'plan_id': planId,
+        'tanggal_mulai': tanggalMulai,
+        'tanggal_berakhir': tanggalBerakhir,
+        'status': 'aktif',
+      });
+
+      await Supabase.instance.client.from('payments').insert({
+        'user_id': userId,
+        'plan_id': planId,
+        'jumlah': harga,
+        'status': 'lunas',
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pembayaran berhasil (demo), membership aktif'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        setState(() {
+          _isLoading = true;
+        });
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Gagal membeli paket: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -358,22 +459,50 @@ class _MemberDashboardState extends State<MemberDashboard> {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: ListTile(
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: const CircleAvatar(
-          backgroundColor: Colors.deepPurple,
-          child: Icon(Icons.star_rounded, color: Colors.white, size: 20),
-        ),
-        title: Text(
-          plan['nama'] ?? '-',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text('${plan['durasi_hari'] ?? '-'} hari'),
-        trailing: Text(
-          _formatRupiah(plan['harga'] ?? 0),
-          style: const TextStyle(
-              fontWeight: FontWeight.bold, color: Colors.deepPurple),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              backgroundColor: Colors.deepPurple,
+              child: Icon(Icons.star_rounded, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    plan['nama'] ?? '-',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${plan['durasi_hari'] ?? '-'} hari',
+                    style: const TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                  Text(
+                    _formatRupiah(plan['harga'] ?? 0),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.deepPurple),
+                  ),
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => _buyPlan(plan),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Beli Paket',
+                  style:
+                      TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          ],
         ),
       ),
     );
