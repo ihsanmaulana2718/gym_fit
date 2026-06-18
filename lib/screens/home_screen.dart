@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'admin_dashboard.dart';
 import 'member_dashboard.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -56,6 +57,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         body: const Center(child: CircularProgressIndicator()),
       );
+    }
+
+    if (_userData?['role'] == 'admin') {
+      return const AdminDashboard();
     }
 
     if (_userData?['role'] == 'member') {
