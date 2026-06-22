@@ -236,11 +236,11 @@ class _MemberDashboardState extends State<MemberDashboard> {
       final durasi = (plan['durasi_hari'] as num?)?.toInt() ?? 0;
       final now = DateTime.now();
 
-      String _fmt(DateTime d) =>
+      String fmt(DateTime d) =>
           '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-      final tanggalMulai = _fmt(now);
-      final tanggalBerakhir = _fmt(now.add(Duration(days: durasi)));
+      final tanggalMulai = fmt(now);
+      final tanggalBerakhir = fmt(now.add(Duration(days: durasi)));
 
       await Supabase.instance.client
           .from('memberships')
@@ -281,6 +281,62 @@ class _MemberDashboardState extends State<MemberDashboard> {
           SnackBar(
               content: Text('Gagal membeli paket: $e'),
               backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _cancelMembership() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Batalkan Langganan'),
+        content: const Text('Apakah kamu yakin ingin membatalkan langganan aktif kamu?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Tidak'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Ya, Batalkan'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      await Supabase.instance.client
+          .from('memberships')
+          .update({'status': 'nonaktif'})
+          .eq('user_id', userId)
+          .eq('status', 'aktif');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Langganan dibatalkan'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        setState(() => _isLoading = true);
+        _loadData();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal membatalkan langganan: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -438,6 +494,21 @@ class _MemberDashboardState extends State<MemberDashboard> {
                       color: Colors.green, fontWeight: FontWeight.w600),
                 ),
               ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _cancelMembership,
+                  icon: const Icon(Icons.cancel_outlined, size: 18),
+                  label: const Text('Batalkan Langganan'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
             ],
           ],
         ),
@@ -508,7 +579,26 @@ class _MemberDashboardState extends State<MemberDashboard> {
     );
   }
 
+  Widget _buildLockedView() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.lock_outline, size: 64, color: Colors.grey),
+          SizedBox(height: 16),
+          Text(
+            'Kamu perlu berlangganan paket dulu\nuntuk mengakses fitur ini',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, fontSize: 15),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAbsensiTab() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_activeMembership == null) return _buildLockedView();
     return RefreshIndicator(
       onRefresh: _loadAttendances,
       child: ListView(
@@ -575,6 +665,8 @@ class _MemberDashboardState extends State<MemberDashboard> {
   }
 
   Widget _buildKelasTab() {
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+    if (_activeMembership == null) return _buildLockedView();
     if (_isLoadingClasses) return const Center(child: CircularProgressIndicator());
     return RefreshIndicator(
       onRefresh: _loadClasses,

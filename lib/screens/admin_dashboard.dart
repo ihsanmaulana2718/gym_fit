@@ -17,6 +17,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isLoadingPlans = true;
 
   List<Map<String, dynamic>> _classes = [];
+  Map<String, List<String>> _classParticipants = {};
   bool _isLoadingClasses = true;
 
   static const _roles = ['member', 'admin'];
@@ -79,12 +80,32 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Future<void> _loadClasses() async {
     if (mounted) setState(() => _isLoadingClasses = true);
     try {
-      final data = await Supabase.instance.client
-          .from('classes')
-          .select('id, nama, jadwal, kuota')
-          .order('nama');
+      final results = await Future.wait([
+        Supabase.instance.client
+            .from('classes')
+            .select('id, nama, jadwal, kuota')
+            .order('nama'),
+        Supabase.instance.client
+            .from('class_bookings')
+            .select('class_id, users(nama)'),
+      ]);
+
+      final classes = List<Map<String, dynamic>>.from(results[0] as List);
+      final bookings = List<Map<String, dynamic>>.from(results[1] as List);
+
+      final Map<String, List<String>> participants = {};
+      for (final b in bookings) {
+        final classId = b['class_id']?.toString() ?? '';
+        if (classId.isEmpty) continue;
+        final nama = (b['users'] as Map<String, dynamic>?)?['nama']?.toString() ?? 'Tidak diketahui';
+        participants.putIfAbsent(classId, () => []).add(nama);
+      }
+
       if (mounted) {
-        setState(() => _classes = List<Map<String, dynamic>>.from(data as List));
+        setState(() {
+          _classes = classes;
+          _classParticipants = participants;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -451,6 +472,113 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _deleteMember(Map<String, dynamic> user) async {
+    final adminId = Supabase.instance.client.auth.currentUser?.id;
+    final userId = user['id']?.toString() ?? '';
+
+    if (userId == adminId) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tidak bisa menghapus akun sendiri'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    final nama = user['nama']?.toString() ?? '-';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus Member'),
+        content: Text(
+          'Hapus member "$nama"?\n\nTindakan ini akan menghapus seluruh data user secara permanen dan tidak dapat dibatalkan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final db = Supabase.instance.client;
+      await db.from('payments').delete().eq('user_id', userId);
+      await db.from('memberships').delete().eq('user_id', userId);
+      await db.from('attendances').delete().eq('user_id', userId);
+      await db.from('class_bookings').delete().eq('user_id', userId);
+      await db.from('users').delete().eq('id', userId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Member berhasil dihapus'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _loadUsers();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menghapus member: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _showPesertaDialog(String classId, String className) {
+    final peserta = _classParticipants[classId] ?? [];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Peserta: $className'),
+        content: peserta.isEmpty
+            ? const Text('Belum ada peserta')
+            : SizedBox(
+                width: double.maxFinite,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: peserta.length,
+                  separatorBuilder: (_, x) => const Divider(height: 1),
+                  itemBuilder: (_, i) => ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.teal.withValues(alpha: 0.15),
+                      child: Text(
+                        '${i + 1}',
+                        style: const TextStyle(fontSize: 12, color: Colors.teal),
+                      ),
+                    ),
+                    title: Text(peserta[i]),
+                  ),
+                ),
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _logout() async {
     await Supabase.instance.client.auth.signOut();
   }
@@ -561,6 +689,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               onPressed: () => _changeRole(user['id']?.toString() ?? '', role),
               style: TextButton.styleFrom(foregroundColor: Colors.deepPurple),
               child: const Text('Ubah Role'),
+            ),
+            IconButton(
+              onPressed: () => _deleteMember(user),
+              icon: const Icon(Icons.delete_outline),
+              color: Colors.red,
+              tooltip: 'Hapus Member',
             ),
           ],
         ),
@@ -696,51 +830,97 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Widget _buildKelasCard(Map<String, dynamic> kelas) {
+    final classId = kelas['id']?.toString() ?? '';
+    final kuota = (kelas['kuota'] as num?)?.toInt() ?? 0;
+    final terisi = _classParticipants[classId]?.length ?? 0;
+    final sisa = (kuota - terisi).clamp(0, kuota);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 2,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: Colors.teal.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.fitness_center_outlined, color: Colors.teal),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    kelas['nama']?.toString() ?? '-',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${kelas['jadwal']}  ·  Kuota: ${kelas['kuota']}',
-                    style: const TextStyle(color: Colors.grey, fontSize: 13),
+                  child: const Icon(Icons.fitness_center_outlined, color: Colors.teal),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        kelas['nama']?.toString() ?? '-',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        kelas['jadwal']?.toString() ?? '-',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            'Terisi $terisi / $kuota',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: terisi >= kuota ? Colors.red : Colors.grey,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '·  Sisa $sisa slot',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: sisa == 0 ? Colors.red : Colors.teal,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
+                ),
+                IconButton(
+                  onPressed: () => _showKelasDialog(kelas: kelas),
+                  icon: const Icon(Icons.edit_outlined),
+                  color: Colors.orange,
+                  tooltip: 'Edit',
+                ),
+                IconButton(
+                  onPressed: () => _deleteKelas(kelas),
+                  icon: const Icon(Icons.delete_outline),
+                  color: Colors.red,
+                  tooltip: 'Hapus',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _showPesertaDialog(classId, kelas['nama']?.toString() ?? '-'),
+                icon: const Icon(Icons.people_outline, size: 18),
+                label: Text('Lihat Peserta ($terisi)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.teal,
+                  side: const BorderSide(color: Colors.teal),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
               ),
-            ),
-            IconButton(
-              onPressed: () => _showKelasDialog(kelas: kelas),
-              icon: const Icon(Icons.edit_outlined),
-              color: Colors.orange,
-              tooltip: 'Edit',
-            ),
-            IconButton(
-              onPressed: () => _deleteKelas(kelas),
-              icon: const Icon(Icons.delete_outline),
-              color: Colors.red,
-              tooltip: 'Hapus',
             ),
           ],
         ),

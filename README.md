@@ -62,8 +62,8 @@ Tidak ada server atau API buatan sendiri. Semua logika bisnis dieksekusi di sisi
 
 | Role | Hak Akses |
 |------|-----------|
-| **Member** | Melihat status membership aktif · Melihat daftar paket dan membeli paket (simulasi demo) · Check-in kehadiran · Melihat riwayat kehadiran · Melihat dan mendaftar kelas yang tersedia |
-| **Admin** | Melihat seluruh daftar pengguna dan mengubah role · Menambah, mengedit, dan menghapus paket membership · Menambah, mengedit, dan menghapus kelas |
+| **Member** | Melihat status membership aktif · Melihat daftar paket dan membeli paket (simulasi demo) · Membatalkan langganan aktif · Check-in kehadiran dan melihat riwayat kehadiran (hanya jika berlangganan) · Melihat dan mendaftar kelas (hanya jika berlangganan) |
+| **Admin** | Melihat seluruh daftar pengguna, mengubah role, dan menghapus member beserta seluruh datanya · Menambah, mengedit, dan menghapus paket membership · Menambah, mengedit, menghapus kelas, serta melihat peserta dan sisa slot tiap kelas |
 
 Role baru yang mendaftar secara default adalah **member**. Admin dapat mengubah role pengguna mana pun melalui tab Member di dashboard admin.
 
@@ -97,16 +97,19 @@ Dashboard member memiliki tiga tab navigasi di bagian bawah layar.
   3. SnackBar hijau muncul: _"Pembayaran berhasil (demo), membership aktif"_.
   4. Kartu Status Membership langsung diperbarui menampilkan paket yang baru dibeli.
   5. Jika terjadi kesalahan, ditampilkan SnackBar merah dengan pesan error.
+- **Tombol "Batalkan Langganan"** — Jika member sedang berlangganan, kartu Status Membership menampilkan tombol merah ini. Setelah konfirmasi dialog, seluruh membership aktif milik member diubah statusnya menjadi `nonaktif`, SnackBar _"Langganan dibatalkan"_ ditampilkan, dan tampilan kembali ke kondisi belum berlangganan. Tab Kelas dan Tab Absensi pun otomatis terkunci kembali.
 - Data dapat diperbarui dengan **tarik ke bawah** (_pull-to-refresh_).
 
 #### Tab 2 — 📋 Absensi
 
+- **Akses terkunci tanpa membership aktif** — Tab ini hanya dapat dibuka jika member memiliki membership aktif. Jika belum berlangganan, seluruh isi tab digantikan oleh tampilan ikon gembok dan pesan _"Kamu perlu berlangganan paket dulu untuk mengakses fitur ini"_; tombol check-in maupun riwayat kehadiran tidak ditampilkan sama sekali.
 - **Tombol "Check-in Sekarang"** — Mencatat satu baris kehadiran ke tabel `attendances` dengan `waktu_checkin` diisi otomatis oleh database.
 - **Riwayat Kehadiran** — Daftar seluruh waktu check-in pengguna, diurutkan dari yang paling baru, dalam format `DD/MM/YYYY HH:MM`.
 - Data dapat diperbarui dengan **tarik ke bawah** (_pull-to-refresh_).
 
 #### Tab 3 — 🏃 Kelas
 
+- **Akses terkunci tanpa membership aktif** — Tab ini hanya dapat dibuka jika member memiliki membership aktif. Jika belum berlangganan, seluruh isi tab digantikan oleh tampilan ikon gembok dan pesan _"Kamu perlu berlangganan paket dulu untuk mengakses fitur ini"_; daftar kelas dan tombol daftar tidak ditampilkan sama sekali.
 - **Daftar Kelas** — Menampilkan seluruh kelas yang ada beserta nama, jadwal, dan kapasitas (terisi / kuota).
 - **Tombol Daftar** — Mendaftarkan pengguna ke kelas yang dipilih. Tombol berubah tampilan menjadi:
   - **"Sudah Terdaftar"** (abu-abu, nonaktif) — jika pengguna sudah pernah mendaftar kelas ini.
@@ -123,6 +126,7 @@ Dashboard admin memiliki tiga tab navigasi di bagian bawah layar.
 
 - Menampilkan daftar semua pengguna terdaftar beserta nama, email, dan role saat ini.
 - Tombol **"Ubah Role"** pada setiap kartu pengguna membuka dialog untuk memilih role baru (`member` atau `admin`). Perubahan langsung tersimpan ke database.
+- Ikon 🗑️ **(hapus)** pada setiap kartu pengguna untuk menghapus member secara permanen. Sebelum menghapus, ditampilkan dialog konfirmasi yang menyebutkan nama pengguna dan peringatan bahwa seluruh data terkait — `payments`, `memberships`, `attendances`, `class_bookings` — juga akan dihapus secara berurutan sebelum baris `users` dihapus. Admin tidak dapat menghapus akun dirinya sendiri; jika dicoba, ditampilkan SnackBar _"Tidak bisa menghapus akun sendiri"_.
 
 #### Tab 2 — 🎫 Paket
 
@@ -133,9 +137,10 @@ Dashboard admin memiliki tiga tab navigasi di bagian bawah layar.
 
 #### Tab 3 — 🏋️ Kelas
 
-- Menampilkan daftar seluruh kelas beserta nama, jadwal, dan kuota.
+- Menampilkan daftar seluruh kelas beserta nama, jadwal, informasi **Terisi X / Y** (jumlah peserta yang sudah mendaftar / kuota), dan **Sisa Z slot** (tidak pernah negatif, minimal 0).
 - Tombol **"Tambah Kelas"** membuka form dialog dengan validasi input untuk menambahkan kelas baru (nama, jadwal, dan kuota).
-- Ikon ✏️ **(edit)** untuk memperbarui data kelas yang sudah ada.
+- Tombol **"Lihat Peserta (X)"** pada setiap kartu kelas membuka dialog yang menampilkan daftar nama member yang mendaftar kelas tersebut. Jika belum ada yang mendaftar, ditampilkan teks _"Belum ada peserta"_.
+- Ikon ✏️ **(edit)** untuk memperbarui data kelas, termasuk menambah atau mengurangi kuota slot.
 - Ikon 🗑️ **(hapus)** dengan dialog konfirmasi untuk menghapus kelas secara permanen.
 
 ---
@@ -237,16 +242,16 @@ APK ini dapat langsung diinstal di perangkat Android dengan mengaktifkan opsi **
 1. Buka aplikasi → ketuk **"Belum punya akun? Daftar di sini"**.
 2. Isi nama lengkap, email, dan password → ketuk **"Daftar"**.
 3. Login dengan email dan password yang telah didaftarkan.
-4. Di tab **Beranda**: lihat status membership dan daftar paket. Ketuk **"Beli Paket"** untuk membeli paket secara simulasi demo, lalu konfirmasi dengan menekan **"Ya, Beli"**.
-5. Di tab **Absensi**: ketuk **"Check-in Sekarang"** setiap kali datang ke gym untuk mencatat kehadiran. Riwayat check-in ditampilkan di bawahnya.
-6. Di tab **Kelas**: lihat jadwal kelas yang tersedia beserta sisa kuota, lalu ketuk **"Daftar"** untuk memesan tempat.
+4. Di tab **Beranda**: lihat status membership dan daftar paket. Ketuk **"Beli Paket"** untuk membeli paket secara simulasi demo, lalu konfirmasi dengan menekan **"Ya, Beli"**. Jika ingin membatalkan langganan yang aktif, ketuk **"Batalkan Langganan"** pada kartu status membership dan konfirmasi dialog.
+5. Di tab **Absensi** _(hanya tersedia setelah berlangganan)_: ketuk **"Check-in Sekarang"** setiap kali datang ke gym untuk mencatat kehadiran. Riwayat check-in ditampilkan di bawahnya.
+6. Di tab **Kelas** _(hanya tersedia setelah berlangganan)_: lihat jadwal kelas yang tersedia beserta sisa kuota, lalu ketuk **"Daftar"** untuk memesan tempat.
 
 ### Untuk Admin
 
 1. Login menggunakan akun yang sudah diubah rolenya menjadi `admin`.
-2. Di tab **Member**: lihat semua pengguna terdaftar. Ketuk **"Ubah Role"** untuk mengganti role pengguna antara `member` dan `admin`.
+2. Di tab **Member**: lihat semua pengguna terdaftar. Ketuk **"Ubah Role"** untuk mengganti role pengguna antara `member` dan `admin`. Ketuk ikon 🗑️ untuk menghapus member beserta seluruh datanya secara permanen (dengan konfirmasi terlebih dahulu).
 3. Di tab **Paket**: kelola paket membership — tambah paket baru, edit nama/durasi/harga, atau hapus paket.
-4. Di tab **Kelas**: kelola kelas — tambah kelas baru, edit jadwal/kuota, atau hapus kelas.
+4. Di tab **Kelas**: kelola kelas — tambah kelas baru, edit jadwal/kuota (termasuk menambah atau mengurangi slot), atau hapus kelas. Ketuk **"Lihat Peserta"** untuk melihat daftar nama member yang mendaftar di kelas tersebut.
 
 ### Cara Membuat Akun Admin Pertama
 
